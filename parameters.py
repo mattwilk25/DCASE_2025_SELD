@@ -11,7 +11,7 @@ Date: January 2025
 params = {
 
     # choose task
-    'modality': 'audio_visual',  # 'audio' or 'audio_visual'
+    'modality': 'audio',  # 'audio' or 'audio_visual'
     'net_type': 'SELDnet',
 
     # data params
@@ -69,7 +69,7 @@ params = {
     'weight_decay': 0,
 
     # folds for training, testing
-    'dev_train_folds': ['fold1', 'fold3'],  # 'fold1' is the synthetic training data. You can skip that if you do not use the synthetic data to train.
+    'dev_train_folds': ['fold3'],  # fold1 (synthetic) not downloaded; using real training data only
     'dev_test_folds': ['fold4'],
 
     # metric params

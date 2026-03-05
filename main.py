@@ -17,6 +17,7 @@ from metrics import ComputeSELDResults
 from data_generator import DataGenerator
 from torch.utils.data import DataLoader
 from extract_features import SELDFeatureExtractor
+from tqdm import tqdm
 import utils
 import pickle
 
@@ -26,7 +27,7 @@ def train_epoch(seld_model, dev_train_iterator, optimizer, seld_loss):
     seld_model.train()
     train_loss_per_epoch = 0  # Track loss per iteration to average over the epoch.
 
-    for i, (input_features, labels) in enumerate(dev_train_iterator):
+    for i, (input_features, labels) in enumerate(tqdm(dev_train_iterator, desc="Train", leave=False)):
         optimizer.zero_grad()
         labels = labels.to(device)
         # Handling modalities
@@ -57,7 +58,7 @@ def val_epoch(seld_model, dev_test_iterator, seld_loss, seld_metrics, output_dir
     seld_model.eval()
     val_loss_per_epoch = 0  # Track loss per iteration to average over the epoch.
     with torch.no_grad():
-        for j, (input_features, labels) in enumerate(dev_test_iterator):
+        for j, (input_features, labels) in enumerate(tqdm(dev_test_iterator, desc="Val", leave=False)):
             labels = labels.to(device)
 
             # Handling modalities
@@ -103,14 +104,20 @@ def main():
     feature_extractor.extract_labels(split='dev')
 
     # Set up dev_train and dev_test data iterator
+    print("Building train dataset...", flush=True)
     dev_train_dataset = DataGenerator(params=params, mode='dev_train')
     dev_train_iterator = DataLoader(dataset=dev_train_dataset, batch_size=params['batch_size'], num_workers=params['nb_workers'], shuffle=params['shuffle'], drop_last=True)
+    print(f"  Train: {len(dev_train_dataset)} clips, {len(dev_train_iterator)} batches", flush=True)
 
+    print("Building test dataset...", flush=True)
     dev_test_dataset = DataGenerator(params=params, mode='dev_test')
     dev_test_iterator = DataLoader(dataset=dev_test_dataset, batch_size=params['batch_size'], num_workers=params['nb_workers'], shuffle=False, drop_last=False)
+    print(f"  Test:  {len(dev_test_dataset)} clips, {len(dev_test_iterator)} batches", flush=True)
 
     # create model, optimizer, loss and metrics
+    print("Building model...", flush=True)
     seld_model = SELDModel(params=params).to(device)
+    print(f"  Device: {device}", flush=True)
     optimizer = torch.optim.Adam(params=seld_model.parameters(), lr=params['learning_rate'], weight_decay=params['weight_decay'])
 
     if params['multiACCDOA']:
@@ -131,26 +138,32 @@ def main():
         start_epoch = model_ckpt['epoch'] + 1
         best_f_score = model_ckpt['best_f_score']
 
+    VAL_INTERVAL = 5  # run full validation every N epochs
+
     for epoch in range(start_epoch, params['nb_epochs']):
         # ------------- Training -------------- #
         avg_train_loss = train_epoch(seld_model, dev_train_iterator, optimizer, seld_loss)
-        # -------------  Validation -------------- #
-        avg_val_loss, metric_scores = val_epoch(seld_model, dev_test_iterator, seld_loss, seld_metrics, output_dir)
-        val_f, val_ang_error, val_dist_error, val_rel_dist_error, val_onscreen_acc, class_wise_scr = metric_scores
-        # ------------- Log losses and metrics ------------- #
 
-        print(
-            f"Epoch {epoch + 1}/{params['nb_epochs']} | "
-            f"Train Loss: {avg_train_loss:.2f} | "
-            f"Val Loss: {avg_val_loss:.2f} | "
-            f"F-score: {val_f * 100:.2f} | "
-            f"Ang Err: {val_ang_error:.2f} | "
-            f"Dist Err: {val_dist_error:.2f} | "
-            f"Rel Dist Err: {val_rel_dist_error:.2f}" +
-            (f" | On-Screen Acc: {val_onscreen_acc:.2f}" if params['modality'] == 'audio_visual' else "")
-        )
+        # ------------- Validation (every VAL_INTERVAL epochs) -------------- #
+        if (epoch + 1) % VAL_INTERVAL == 0 or epoch == params['nb_epochs'] - 1:
+            avg_val_loss, metric_scores = val_epoch(seld_model, dev_test_iterator, seld_loss, seld_metrics, output_dir)
+            val_f, val_ang_error, val_dist_error, val_rel_dist_error, val_onscreen_acc, class_wise_scr = metric_scores
+            print(
+                f"Epoch {epoch + 1}/{params['nb_epochs']} | "
+                f"Train Loss: {avg_train_loss:.2f} | "
+                f"Val Loss: {avg_val_loss:.2f} | "
+                f"F-score: {val_f * 100:.2f} | "
+                f"Ang Err: {val_ang_error:.2f} | "
+                f"Dist Err: {val_dist_error:.2f} | "
+                f"Rel Dist Err: {val_rel_dist_error:.2f}" +
+                (f" | On-Screen Acc: {val_onscreen_acc:.2f}" if params['modality'] == 'audio_visual' else "")
+            )
+        else:
+            val_f = float('-inf')  # skip save on non-validation epochs
+            print(f"Epoch {epoch + 1}/{params['nb_epochs']} | Train Loss: {avg_train_loss:.2f}", flush=True)
+
         # ------------- Save model if validation f score improves -------------#
-        if val_f >= best_f_score:
+        if val_f > best_f_score:
             best_f_score = val_f
             net_save = {'seld_model': seld_model.state_dict(), 'opt': optimizer.state_dict(), 'epoch': epoch,
                         'best_f_score': best_f_score, 'best_ang_err': val_ang_error, 'best_rel_dist_err': val_rel_dist_error}
@@ -168,7 +181,7 @@ def main():
 
 
 if __name__ == '__main__':
-    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:0' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu')
     restore_from_checkpoint = False
     initial_checkpoint_path = 'checkpoints/SELDnet_audio_visual_multiACCDOA_20250331_173131'
 

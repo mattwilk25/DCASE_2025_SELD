@@ -67,6 +67,6 @@ def run_inference():
 
 
 if __name__ == '__main__':
-    model_dir = "checkpoints/SELDnet_audio_multiACCDOA_20250330_170742"
+    model_dir = "checkpoints/SELDnet_audio_multiACCDOA_20250331_152343"
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     run_inference()
